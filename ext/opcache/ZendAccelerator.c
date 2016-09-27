@@ -2582,13 +2582,13 @@ static int accel_remap_huge_pages(void *start, size_t size, const char *name, si
 
 #  ifdef MAP_HUGETLB
 	ret = mmap(start, size,
-		PROT_READ | PROT_WRITE | PROT_EXEC,
+		PROT_READ | PROT_WRITE,
 		MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED | MAP_HUGETLB,
 		-1, 0);
 #  endif
 	if (ret == MAP_FAILED) {
 		ret = mmap(start, size,
-			PROT_READ | PROT_WRITE | PROT_EXEC,
+			PROT_READ | PROT_WRITE,
 			MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED,
 			-1, 0);
 		/* this should never happen? */
