@@ -2158,7 +2158,7 @@ ZEND_API int zend_register_functions(zend_class_entry *scope, const zend_functio
 		internal_function->prototype = NULL;
 		if (ptr->flags) {
 			if (!(ptr->flags & ZEND_ACC_PPP_MASK)) {
-				if (ptr->flags != ZEND_ACC_DEPRECATED || scope) {
+				if (ptr->flags != ZEND_ACC_DEPRECATED && scope) {
 					zend_error(error_type, "Invalid access level for %s%s%s() - access must be exactly one of public, protected or private", scope ? ZSTR_VAL(scope->name) : "", scope ? "::" : "", ptr->fname);
 				}
 				internal_function->fn_flags = ZEND_ACC_PUBLIC | ptr->flags;
@@ -3883,6 +3883,24 @@ ZEND_API void zend_update_property_null(zend_class_entry *scope, zval *object, c
 
 	ZVAL_NULL(&tmp);
 	zend_update_property(scope, object, name, name_length, &tmp);
+}
+/* }}} */
+
+ZEND_API void zend_unset_property(zend_class_entry *scope, zval *object, const char *name, size_t name_length) /* {{{ */
+{
+	zval property;
+	zend_class_entry *old_scope = EG(fake_scope);
+
+	EG(fake_scope) = scope;
+
+	if (!Z_OBJ_HT_P(object)->unset_property) {
+		zend_error_noreturn(E_CORE_ERROR, "Property %s of class %s cannot be unset", name, ZSTR_VAL(Z_OBJCE_P(object)->name));
+	}
+	ZVAL_STRINGL(&property, name, name_length);
+	Z_OBJ_HT_P(object)->unset_property(object, &property, 0);
+	zval_ptr_dtor(&property);
+
+	EG(fake_scope) = old_scope;
 }
 /* }}} */
 

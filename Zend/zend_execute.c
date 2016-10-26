@@ -567,7 +567,6 @@ static inline zval *_get_obj_zval_ptr_ptr(int op_type, znode_op node, zend_execu
 static inline void zend_assign_to_variable_reference(zval *variable_ptr, zval *value_ptr)
 {
 	zend_reference *ref;
-	zval garbage;
 
 	if (EXPECTED(!Z_ISREF_P(value_ptr))) {
 		ZVAL_NEW_REF(value_ptr, value_ptr);
@@ -577,9 +576,18 @@ static inline void zend_assign_to_variable_reference(zval *variable_ptr, zval *v
 
 	ref = Z_REF_P(value_ptr);
 	GC_REFCOUNT(ref)++;
-	ZVAL_COPY_VALUE(&garbage, variable_ptr);
+	if (Z_REFCOUNTED_P(variable_ptr)) {
+		zend_refcounted *garbage = Z_COUNTED_P(variable_ptr);
+
+		if (--GC_REFCOUNT(garbage) == 0) {
+			ZVAL_REF(variable_ptr, ref);
+			zval_dtor_func(garbage);
+			return;
+		} else {
+			gc_check_possible_root(garbage);
+		}
+	}
 	ZVAL_REF(variable_ptr, ref);
-	zval_ptr_dtor(&garbage);
 }
 
 /* this should modify object only if it's empty */
@@ -2055,12 +2063,12 @@ static zend_always_inline void i_free_compiled_variables(zend_execute_data *exec
 	zval *end = cv + EX(func)->op_array.last_var;
 	while (EXPECTED(cv != end)) {
 		if (Z_REFCOUNTED_P(cv)) {
-			if (!Z_DELREF_P(cv)) {
-				zend_refcounted *r = Z_COUNTED_P(cv);
+			zend_refcounted *r = Z_COUNTED_P(cv);
+			if (!--GC_REFCOUNT(r)) {
 				ZVAL_NULL(cv);
 				zval_dtor_func(r);
 			} else {
-				GC_ZVAL_CHECK_POSSIBLE_ROOT(cv);
+				gc_check_possible_root(r);
 			}
 		}
 		cv++;
@@ -2651,6 +2659,9 @@ static zend_never_inline zend_execute_data *zend_init_dynamic_call_object(zval *
 			ZEND_ASSERT(GC_TYPE((zend_object*)fbc->common.prototype) == IS_OBJECT);
 			GC_REFCOUNT((zend_object*)fbc->common.prototype)++;
 			call_info |= ZEND_CALL_CLOSURE;
+			if (fbc->common.fn_flags & ZEND_ACC_FAKE_CLOSURE) {
+				call_info |= ZEND_CALL_FAKE_CLOSURE;
+			}
 		} else if (object) {
 			call_info |= ZEND_CALL_RELEASE_THIS;
 			GC_REFCOUNT(object)++; /* For $this pointer */
