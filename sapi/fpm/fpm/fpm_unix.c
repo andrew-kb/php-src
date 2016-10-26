@@ -25,6 +25,13 @@
 #include <sys/acl.h>
 #endif
 
+#ifdef HAVE_SECCOMP
+#include <linux/audit.h>
+#include <linux/filter.h>
+#include <linux/seccomp.h>
+#include <linux/unistd.h>
+#endif
+
 #include "fpm.h"
 #include "fpm_conf.h"
 #include "fpm_cleanup.h"
@@ -441,6 +448,78 @@ int fpm_unix_init_child(struct fpm_worker_pool_s *wp) /* {{{ */
 }
 /* }}} */
 
+#ifdef HAVE_SECCOMP
+#define syscall_arg(_n) (offsetof(struct seccomp_data, args[_n]))
+#define syscall_nr (offsetof(struct seccomp_data, nr))
+
+#define BLACKLIST_CALL(syscall)	\
+	BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, (syscall), 0, 1),\
+	BPF_STMT(BPF_RET+BPF_K, SECCOMP_RET_KILL)
+
+static int fpm_install_seccomp() /* {{{ */
+{
+	struct sock_filter filter[] = {
+		BPF_STMT(BPF_LD+BPF_W+BPF_ABS, syscall_nr),
+		BLACKLIST_CALL(__NR_symlink),
+		BLACKLIST_CALL(__NR_ptrace),
+		BLACKLIST_CALL(__NR_syslog),
+		BLACKLIST_CALL(__NR_setsid),
+		BLACKLIST_CALL(__NR_mknod),
+		BLACKLIST_CALL(__NR_uselib),
+		BLACKLIST_CALL(__NR_personality),
+		BLACKLIST_CALL(__NR_modify_ldt),
+		BLACKLIST_CALL(__NR_pivot_root),
+		BLACKLIST_CALL(__NR__sysctl),
+		BLACKLIST_CALL(__NR_adjtimex),
+		BLACKLIST_CALL(__NR_acct),
+		BLACKLIST_CALL(__NR_settimeofday),
+		BLACKLIST_CALL(__NR_mount),
+		BLACKLIST_CALL(__NR_umount2),
+		BLACKLIST_CALL(__NR_swapon),
+		BLACKLIST_CALL(__NR_swapoff),
+		BLACKLIST_CALL(__NR_reboot),
+		BLACKLIST_CALL(__NR_iopl),
+		BLACKLIST_CALL(__NR_ioperm),
+		BLACKLIST_CALL(__NR_init_module),
+		BLACKLIST_CALL(__NR_delete_module),
+		BLACKLIST_CALL(__NR_quotactl),
+		BLACKLIST_CALL(__NR_tkill),
+		BLACKLIST_CALL(__NR_tgkill),
+		BLACKLIST_CALL(__NR_utimes),
+		BLACKLIST_CALL(__NR_kexec_load),
+		BLACKLIST_CALL(__NR_add_key),
+		BLACKLIST_CALL(__NR_request_key),
+		BLACKLIST_CALL(__NR_keyctl),
+		BLACKLIST_CALL(__NR_ioprio_set),
+		BLACKLIST_CALL(__NR_migrate_pages),
+		BLACKLIST_CALL(__NR_move_pages),
+		BLACKLIST_CALL(__NR_process_vm_readv),
+		BLACKLIST_CALL(__NR_process_vm_writev),
+		BLACKLIST_CALL(__NR_kcmp),
+		BLACKLIST_CALL(__NR_finit_module),
+
+		BPF_STMT(BPF_RET+BPF_K, SECCOMP_RET_ALLOW),
+	};
+
+	struct sock_fprog prog = {
+		.len = (unsigned short)(sizeof(filter)/sizeof(filter[0])),
+		.filter = filter,
+	};
+
+	if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) {
+		zlog(ZLOG_SYSERROR, "unable to set PR_SET_NO_NEW_PRIVS; errno = %d", errno);
+		return -1;
+	}
+
+	if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog) != 0) {
+		zlog(ZLOG_SYSERROR, "failed to enable seccomp filter (set SECCOMP_MODE_FILTER); errno = %d", errno);
+		return -2;
+	}
+
+	return 0;
+} /* }}} */
+#endif
+
 int fpm_unix_init_main() /* {{{ */
 {
 	struct fpm_worker_pool_s *wp;
@@ -575,6 +654,12 @@ int fpm_unix_init_main() /* {{{ */
 			return -1;
 		}
 	}
+
+#if HAVE_SECCOMP
+	if (0 != fpm_install_seccomp()) {
+		return -1;
+	}
+#endif
 
 	return 0;
 }
