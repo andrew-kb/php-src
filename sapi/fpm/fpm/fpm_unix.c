@@ -532,7 +532,8 @@ static const cap_value_t fpm_master_caps[] = {
 	CAP_SYS_CHROOT,
 	CAP_SETUID,
 	CAP_SETGID,
-	CAP_CHOWN
+	CAP_CHOWN,
+	CAP_KILL
 };
 
 /**
