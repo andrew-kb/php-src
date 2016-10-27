@@ -32,6 +32,11 @@
 #include <linux/unistd.h>
 #endif
 
+#ifdef HAVE_CAPS
+#include <sys/capability.h>
+#include <linux/securebits.h>
+#endif
+
 #include "fpm.h"
 #include "fpm_conf.h"
 #include "fpm_cleanup.h"
@@ -520,6 +525,78 @@ static int fpm_install_seccomp() /* {{{ */
 } /* }}} */
 #endif
 
+#ifdef HAVE_CAPS
+
+static const cap_value_t fpm_master_caps[] = {
+	CAP_SYS_NICE,
+	CAP_SYS_CHROOT,
+	CAP_SETUID,
+	CAP_SETGID,
+	CAP_CHOWN
+};
+
+/**
+ * Restrict the capabilities(7) of the master process
+ */
+int fpm_set_master_caps() /* {{{ */
+{
+	const unsigned long flags = (
+		SECBIT_KEEP_CAPS_LOCKED
+		| SECBIT_NOROOT
+		| SECBIT_NOROOT_LOCKED
+		| SECBIT_NO_CAP_AMBIENT_RAISE
+		| SECBIT_NO_CAP_AMBIENT_RAISE_LOCKED
+	);
+
+	cap_t proc_caps = NULL;
+
+	if (prctl(PR_SET_SECUREBITS, flags) != 0) {
+		zlog(ZLOG_SYSERROR, "unable to set the secure bits flags (PR_SET_SECUREBITS); errno = %d", errno);
+		return -1;
+	}
+
+	proc_caps = cap_init();
+	if (proc_caps == NULL) {
+		zlog(ZLOG_SYSERROR, "unable to initialise (cap_init) capabilities; errno = %d", errno);
+		return -2;
+	}
+
+	if (cap_clear(proc_caps) != 0) {
+		cap_free(proc_caps);
+
+		zlog(ZLOG_SYSERROR, "unable to clear all capabilities (cap_clear); errno = %d", errno);
+		return -3;
+	}
+
+	if (cap_set_flag(proc_caps, CAP_EFFECTIVE, sizeof fpm_master_caps / sizeof fpm_master_caps[0], fpm_master_caps, CAP_SET) != 0) {
+		cap_free(proc_caps);
+
+		zlog(ZLOG_SYSERROR, "unable to set required effective caps (cap_set_flag); errno = %d", errno);
+		return -4;
+	}
+
+	if (cap_set_flag(proc_caps, CAP_PERMITTED, sizeof fpm_master_caps / sizeof fpm_master_caps[0], fpm_master_caps, CAP_SET) != 0) {
+		cap_free(proc_caps);
+
+		zlog(ZLOG_SYSERROR, "unable to set required permitted caps (cap_set_flag); errno = %d", errno);
+		return -4;
+	}
+
+	if (cap_set_proc(proc_caps) != 0) {
+		cap_free(proc_caps);
+
+		zlog(ZLOG_SYSERROR, "unable to set the master process capabilities (cap_set_proc); errno = %d", errno);
+		return -4;
+	}
+
+	cap_free(proc_caps);
+	proc_caps = NULL;
+
+	return 0;
+} /* }}} */
+
+#endif
+
 int fpm_unix_init_main() /* {{{ */
 {
 	struct fpm_worker_pool_s *wp;
@@ -658,6 +735,12 @@ int fpm_unix_init_main() /* {{{ */
 #if HAVE_SECCOMP
 	if (0 != fpm_install_seccomp()) {
 		return -1;
+	}
+#endif
+
+#if HAVE_CAPS
+	if (0 != fpm_set_master_caps()) {
+	    return -1;
 	}
 #endif
 
