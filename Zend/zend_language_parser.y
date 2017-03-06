@@ -3,7 +3,7 @@
    +----------------------------------------------------------------------+
    | Zend Engine                                                          |
    +----------------------------------------------------------------------+
-   | Copyright (c) 1998-2016 Zend Technologies Ltd. (http://www.zend.com) |
+   | Copyright (c) 1998-2017 Zend Technologies Ltd. (http://www.zend.com) |
    +----------------------------------------------------------------------+
    | This source file is subject to version 2.00 of the Zend license,     |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -1030,7 +1030,7 @@ function_call:
 
 class_name:
 		T_STATIC
-			{ zval zv; ZVAL_INTERNED_STR(&zv, CG(known_strings)[ZEND_STR_STATIC]);
+			{ zval zv; ZVAL_INTERNED_STR(&zv, ZSTR_KNOWN(ZEND_STR_STATIC));
 			  $$ = zend_ast_create_zval_ex(&zv, ZEND_NAME_NOT_FQ); }
 	|	name { $$ = $1; }
 ;
@@ -1247,10 +1247,10 @@ encaps_var:
 ;
 
 encaps_var_offset:
-		T_STRING		{ $$ = $1; }
-	|	T_NUM_STRING	{ $$ = $1; }
-	|	'-' T_NUM_STRING { $$ = zend_ast_create(ZEND_AST_UNARY_MINUS, $2); }
-	|	T_VARIABLE		{ $$ = zend_ast_create(ZEND_AST_VAR, $1); }
+		T_STRING			{ $$ = $1; }
+	|	T_NUM_STRING		{ $$ = $1; }
+	|	'-' T_NUM_STRING 	{ $$ = zend_negate_num_string($2); }
+	|	T_VARIABLE			{ $$ = zend_ast_create(ZEND_AST_VAR, $1); }
 ;
 
 

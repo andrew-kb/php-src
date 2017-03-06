@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | Zend Engine                                                          |
    +----------------------------------------------------------------------+
-   | Copyright (c) 1998-2016 Zend Technologies Ltd. (http://www.zend.com) |
+   | Copyright (c) 1998-2017 Zend Technologies Ltd. (http://www.zend.com) |
    +----------------------------------------------------------------------+
    | This source file is subject to version 2.00 of the Zend license,     |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -368,7 +368,7 @@ static ZEND_COLD ZEND_NORETURN void zend_mm_safe_error(zend_mm_heap *heap,
 	size_t limit,
 #if ZEND_DEBUG
 	const char *filename,
-	uint lineno,
+	uint32_t lineno,
 #endif
 	size_t size)
 {
@@ -851,6 +851,7 @@ static void *zend_mm_alloc_pages(zend_mm_heap *heap, uint32_t pages_count ZEND_F
 {
 	zend_mm_chunk *chunk = heap->main_chunk;
 	uint32_t page_num, len;
+	int steps = 0;
 
 	while (1) {
 		if (UNEXPECTED(chunk->free_pages < pages_count)) {
@@ -1027,10 +1028,20 @@ get_chunk:
 			goto found;
 		} else {
 			chunk = chunk->next;
+			steps++;
 		}
 	}
 
 found:
+	if (steps > 2 && pages_count < 8) {
+		/* move chunk into the head of the linked-list */
+		chunk->prev->next = chunk->next;
+		chunk->next->prev = chunk->prev;
+		chunk->next = heap->main_chunk->next;
+		chunk->prev = heap->main_chunk;
+		chunk->prev->next = chunk;
+		chunk->next->prev = chunk;
+	}
 	/* mark run as allocated */
 	chunk->free_pages -= pages_count;
 	zend_mm_bitset_set_range(chunk->free_map, page_num, pages_count);
@@ -2288,7 +2299,7 @@ ZEND_API int is_zend_mm(void)
 #endif
 }
 
-#if !ZEND_DEBUG && (!defined(_WIN32) || defined(__clang__))
+#if !ZEND_DEBUG && defined(HAVE_BUILTIN_CONSTANT_P)
 #undef _emalloc
 
 #if ZEND_MM_CUSTOM
